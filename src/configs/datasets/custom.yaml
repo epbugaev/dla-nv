@@ -1,0 +1,7 @@
+val:
+  _target_: src.datasets.CustomDirAudioDataset
+  audio_dir: 
+    _target_: pathlib.Path
+    _args_:
+      - "/Users/epbugaev/Documents/hse_year_4/dla-nv/data/data_test/wavs"
+  instance_transforms: ${transforms.instance_transforms.inference}

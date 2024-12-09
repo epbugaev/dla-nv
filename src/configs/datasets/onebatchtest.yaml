@@ -22,5 +22,5 @@ val:
     _args_:
       - "/Users/epbugaev/Documents/hse_year_4/dla-nv/data/LJSpeech-1.1"
   instance_transforms: ${transforms.instance_transforms.inference}
-  start_idx: 13000
+  start_idx: 13010
   limit: 1
