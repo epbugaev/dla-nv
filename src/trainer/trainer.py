@@ -30,6 +30,7 @@ class Trainer(BaseTrainer):
         """
         batch = self.move_batch_to_device(batch)
         batch = self.transform_batch(batch)  # transform batch on device -- faster
+        batch['spectrogram'] = self.mel_spec(batch['audio'])
 
         metric_funcs = self.metrics["inference"]
         if self.is_train:
@@ -38,6 +39,7 @@ class Trainer(BaseTrainer):
             self.optimizer_discriminator_msd.zero_grad()
 
         y_gen = self.generator(**batch)
+        y_gen_original = y_gen['y_gen']
         y_gen['y_gen'] = y_gen['y_gen'].detach() # Detach generator output while computing discriminator loss
 
         if y_gen['y_gen'].shape[-1] != batch['audio'].shape[-1]:
@@ -72,8 +74,9 @@ class Trainer(BaseTrainer):
                 self.lr_scheduler_discriminator_msd.step()
 
 
-        y_gen = self.generator(**batch)
-       #print('original_shape:', batch['audio'].shape, 'new_shape:', y_gen['y_gen'].shape)
+        #y_gen = self.generator(**batch)
+        y_gen['y_gen'] = y_gen_original
+        print(y_gen['y_gen'].requires_grad)
         batch.update(y_gen)
 
         msd_output = self.discriminator_msd(**batch)

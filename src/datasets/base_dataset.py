@@ -1,6 +1,7 @@
 import logging
 import random
 
+import torch
 import numpy as np
 import torchaudio
 from torch.utils.data import Dataset
@@ -93,8 +94,8 @@ class BaseDataset(Dataset):
         # Note: you may want to preserve both audio in time domain and
         # in time-frequency domain for logging
         instance_data = self.preprocess_data(instance_data, before_spectrogram=True)
-        spectrogram = self.get_spectrogram(instance_data['audio'])
-        instance_data["original_spectrogram"] = spectrogram
+        spectrogram = torch.tensor([0])
+        instance_data["original_spectrogram"] = torch.tensor([0])
         instance_data["spectrogram"] = spectrogram
 
         instance_data = self.preprocess_data(instance_data, before_spectrogram=False)
