@@ -1,7 +1,7 @@
 defaults:
   - writer: wandb
   - metrics: example
-  - datasets: custom
+  - datasets: custom_texts
   - dataloader: inference
   - transforms: only_mel_spec
   - _self_
@@ -15,9 +15,9 @@ discriminator_mpd:
 discriminator_msd:
   _target_: src.model.DiscriminatorMSD
 inferencer:
-  text_to_mel: False
+  text_to_mel: True
   device_tensors: ["spectrogram", "audio"] # which tensors should be on device (ex. GPU)
   device: auto # device name or "auto"
-  save_path: "data/data_test/gen_from_wavs" # any name here, can be a dataset name
+  save_path: "data/data_test/gen_from_texts" # any name here, can be a dataset name
   seed: 1
   from_pretrained: "saved/best_model.pth" # path to the pretrained model
