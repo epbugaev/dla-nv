@@ -14,6 +14,12 @@ from src.logger.logger import setup_logging
 from src.utils.io_utils import ROOT_PATH
 
 
+def get_padding(kernel_size, dilation):
+    """
+    Get padding for a convolution layer so that the output size is the same as the input size.
+    """
+    return (kernel_size*dilation - dilation) // 2
+
 def set_worker_seed(worker_id):
     """
     Set seed for each dataloader worker.
