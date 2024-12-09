@@ -40,6 +40,7 @@ class Trainer(BaseTrainer):
 
         y_gen = self.generator(**batch)
         y_gen_original = y_gen['y_gen']
+        
         y_gen['y_gen'] = y_gen['y_gen'].detach() # Detach generator output while computing discriminator loss
 
         if y_gen['y_gen'].shape[-1] != batch['audio'].shape[-1]:
@@ -74,9 +75,7 @@ class Trainer(BaseTrainer):
                 self.lr_scheduler_discriminator_msd.step()
 
 
-        #y_gen = self.generator(**batch)
         y_gen['y_gen'] = y_gen_original
-        print(y_gen['y_gen'].requires_grad)
         batch.update(y_gen)
 
         msd_output = self.discriminator_msd(**batch)
@@ -122,15 +121,16 @@ class Trainer(BaseTrainer):
         # logging scheme might be different for different partitions
         if mode == "train":  # the method is called only every self.log_step steps
             # self.log_spectrogram(**batch)
-            pass
+            self.log_audio(**batch)
+            self.log_spectrogram(**batch)
         else:
             # Log Stuff
             self.log_audio(**batch)
             self.log_spectrogram(**batch)
 
     def log_audio(self, audio, y_gen, **batch):
-        self.writer.add_audio("audio", audio, self.sample_rate)
-        self.writer.add_audio("y_gen", y_gen.squeeze(1), self.sample_rate)
+        self.writer.add_audio("audio", audio[0, :], self.sample_rate)
+        self.writer.add_audio("y_gen", y_gen.squeeze(1)[0, :], self.sample_rate)
 
     def log_spectrogram(self, spectrogram, y_gen, **batch):
         gen_spectrogram = self.mel_spec(y_gen) + 1e-12
