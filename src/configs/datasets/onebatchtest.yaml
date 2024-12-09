@@ -1,0 +1,26 @@
+train:
+  _target_: src.datasets.LJSpeechDataset
+  data_dir: 
+    _target_: pathlib.Path
+    _args_:
+      - "/Users/epbugaev/Documents/hse_year_4/dla-nv/data/LJSpeech-1.1/wavs"
+  index_dir: 
+    _target_: pathlib.Path
+    _args_:
+      - "/Users/epbugaev/Documents/hse_year_4/dla-nv/data/LJSpeech-1.1"
+  instance_transforms: ${transforms.instance_transforms.train}
+  last_idx: 13000
+  limit: 1
+val:
+  _target_: src.datasets.LJSpeechDataset
+  data_dir: 
+    _target_: pathlib.Path
+    _args_:
+      - "/Users/epbugaev/Documents/hse_year_4/dla-nv/data/LJSpeech-1.1/wavs"
+  index_dir: 
+    _target_: pathlib.Path
+    _args_:
+      - "/Users/epbugaev/Documents/hse_year_4/dla-nv/data/LJSpeech-1.1"
+  instance_transforms: ${transforms.instance_transforms.inference}
+  start_idx: 13000
+  limit: 1
