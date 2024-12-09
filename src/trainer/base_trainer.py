@@ -66,7 +66,7 @@ class BaseTrainer:
         """
         self.is_train = True
         self.sample_rate = sample_rate
-        self.mel_spec = MelSpectrogram()
+        self.mel_spec = MelSpectrogram().to(device)
 
         self.config = config
         self.cfg_trainer = self.config.trainer
