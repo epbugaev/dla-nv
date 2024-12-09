@@ -34,33 +34,35 @@ def main(config):
     dataloaders, batch_transforms = get_dataloaders(config, device)
 
     # build model architecture, then print to console
-    model = instantiate(config.model).to(device)
-    print(model)
+    generator = instantiate(config.generator).to(device)
+    print(generator)
 
     # get metrics
     metrics = instantiate(config.metrics)
 
     # save_path for model predictions
-    save_path = ROOT_PATH / "data" / "saved" / config.inferencer.save_path
+    save_path = ROOT_PATH / config.inferencer.save_path
     save_path.mkdir(exist_ok=True, parents=True)
 
     inferencer = Inferencer(
-        model=model,
+        generator=generator,
         config=config,
         device=device,
         dataloaders=dataloaders,
         batch_transforms=batch_transforms,
+        text_to_mel=config.inferencer.text_to_mel,
         save_path=save_path,
         metrics=metrics,
         skip_model_load=False,
     )
 
     logs = inferencer.run_inference()
-
+    
     for part in logs.keys():
-        for key, value in logs[part].items():
-            full_key = part + "_" + key
-            print(f"    {full_key:15s}: {value}")
+        if logs[part] is not None:
+            for key, value in logs[part].items():
+                full_key = part + "_" + key
+                print(f"    {full_key:15s}: {value}")
 
 
 if __name__ == "__main__":
