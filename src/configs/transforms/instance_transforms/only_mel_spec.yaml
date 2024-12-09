@@ -1,0 +1,6 @@
+train:
+  get_spectrogram: # special key for getting spectrogram
+    _target_: src.transforms.MelSpectrogram
+inference:
+  get_spectrogram:
+    _target_: src.transforms.MelSpectrogram
