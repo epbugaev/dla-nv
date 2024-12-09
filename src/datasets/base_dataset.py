@@ -29,6 +29,7 @@ class BaseDataset(Dataset):
         start_idx: int | None = None, 
         last_idx: int | None = None,
         instance_transforms=None,
+        text_to_mel: bool = False,
     ):
         """
         Args:
@@ -46,6 +47,8 @@ class BaseDataset(Dataset):
             instance_transforms (dict[Callable] | None): transforms that
                 should be applied on the instance. Depend on the
                 tensor name.
+            text_to_mel (bool): if True, returns placeholder tensors for audio and spectrogram fields,
+                and only processes the text field. Used for text-to-mel generation inference.
         """
         self._assert_index_is_valid(index)
         if start_idx != None or last_idx != None: 
@@ -59,11 +62,12 @@ class BaseDataset(Dataset):
         if not shuffle_index:
             index = self._sort_index(index)
 
-        
         self._index: list[dict] = index
 
         self.target_sr = target_sr
         self.instance_transforms = instance_transforms
+
+        self.text_to_mel = text_to_mel
 
     def __getitem__(self, ind):
         """
@@ -82,20 +86,32 @@ class BaseDataset(Dataset):
         """
         data_dict = self._index[ind]
         audio_path = data_dict["path"]
+
+        placeholder = torch.tensor([0])
+        if self.text_to_mel: 
+            instance_data = {
+                "spectrogram": placeholder,
+                "original_spectrogram": placeholder, 
+                "text": data_dict["text"],
+                "audio_path": audio_path,
+                "audio": placeholder, 
+                "original_audio": placeholder,
+            }    
+            return instance_data
+
         audio = self.load_audio(audio_path)
 
         instance_data = {
             "original_audio": audio,
             "audio": audio,
             "audio_path": audio_path,
+            "text": "",
         }
 
-        # TODO think of how to apply wave augs before calculating spectrogram
-        # Note: you may want to preserve both audio in time domain and
-        # in time-frequency domain for logging
         instance_data = self.preprocess_data(instance_data, before_spectrogram=True)
-        spectrogram = torch.tensor([0])
-        instance_data["original_spectrogram"] = torch.tensor([0])
+        spectrogram = placeholder # Moved actual spectrogram calculations on GPU (cannot do them here due to parallelism of this method)
+        
+        instance_data["original_spectrogram"] = placeholder
         instance_data["spectrogram"] = spectrogram
 
         instance_data = self.preprocess_data(instance_data, before_spectrogram=False)

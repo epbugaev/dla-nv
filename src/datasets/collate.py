@@ -16,11 +16,11 @@ def collate_fn(dataset_items: list[dict]):
     """
 
     result_batch = {}
-    copy_keys = ["audio_path"]
+    copy_keys = ["audio_path", "text"]
 
     for copy_key in copy_keys:
         result_batch[copy_key] = [item[copy_key] for item in dataset_items]
-
+    
     tensor_keys = [
         "audio",
         "spectrogram",
