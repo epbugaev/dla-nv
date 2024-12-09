@@ -1,9 +1,12 @@
 import torch
+import torchaudio
+import pathlib
 from tqdm.auto import tqdm
 
 from src.metrics.tracker import MetricTracker
 from src.trainer.base_trainer import BaseTrainer
-
+from src.transforms.mel_spectrogram import MelSpectrogram
+from speechbrain.pretrained import FastSpeech2
 
 class Inferencer(BaseTrainer):
     """
@@ -16,36 +19,35 @@ class Inferencer(BaseTrainer):
 
     def __init__(
         self,
-        model,
+        generator,
         config,
         device,
         dataloaders,
         save_path,
+        text_to_mel=False, 
         metrics=None,
         batch_transforms=None,
         skip_model_load=False,
+        sample_rate=22050,
     ):
         """
         Initialize the Inferencer.
 
         Args:
-            model (nn.Module): PyTorch model.
-            config (DictConfig): run config containing inferencer config.
-            device (str): device for tensors and model.
-            dataloaders (dict[DataLoader]): dataloaders for different
-                sets of data.
-            save_path (str): path to save model predictions and other
-                information.
-            metrics (dict): dict with the definition of metrics for
-                inference (metrics[inference]). Each metric is an instance
-                of src.metrics.BaseMetric.
-            batch_transforms (dict[nn.Module] | None): transforms that
-                should be applied on the whole batch. Depend on the
-                tensor name.
-            skip_model_load (bool): if False, require the user to set
-                pre-trained checkpoint path. Set this argument to True if
-                the model desirable weights are defined outside of the
-                Inferencer Class.
+            generator (nn.Module): PyTorch generator model for audio synthesis.
+            config (DictConfig): Run config containing inferencer config.
+            device (str): Device for tensors and model (e.g. 'cuda', 'cpu').
+            dataloaders (dict[DataLoader]): Dataloaders for different sets of data.
+            save_path (str): Path to save model predictions and other information.
+            text_to_mel (bool): Whether to use text-to-mel generation with FastSpeech2.
+            metrics (dict): Dict with metrics for inference (metrics[inference]). Each metric 
+                is an instance of src.metrics.BaseMetric.
+            batch_transforms (dict[nn.Module] | None): Transforms that should be applied on 
+                the whole batch. Depend on the tensor name.
+            skip_model_load (bool): If False, require the user to set pre-trained checkpoint
+                path. Set this argument to True if the model desirable weights are defined
+                outside of the Inferencer Class.
+            sample_rate (int): Audio sample rate in Hz. Defaults to 22050.
         """
         assert (
             skip_model_load or config.inferencer.get("from_pretrained") is not None
@@ -55,8 +57,20 @@ class Inferencer(BaseTrainer):
         self.cfg_trainer = self.config.inferencer
 
         self.device = device
+        self.mel_spec = MelSpectrogram().to(device)
+        self.sample_rate = sample_rate
 
-        self.model = model
+        self.generator = generator
+        self.discriminator_mpd = None
+        self.discriminator_msd = None 
+
+        self.text_to_mel = text_to_mel
+        if self.text_to_mel:    
+            self.text_to_mel_model = FastSpeech2.from_hparams(
+                source="speechbrain/tts-fastspeech2-ljspeech",
+            )
+            self.text_to_mel_model.eval()
+
         self.batch_transforms = batch_transforms
 
         # define dataloaders
@@ -64,11 +78,12 @@ class Inferencer(BaseTrainer):
 
         # path definition
 
+        print('new save_path:', save_path)
         self.save_path = save_path
 
         # define metrics
         self.metrics = metrics
-        if self.metrics is not None:
+        if self.metrics is not None and self.metrics["inference"] is not None:
             self.evaluation_metrics = MetricTracker(
                 *[m.name for m in self.metrics["inference"]],
                 writer=None,
@@ -119,36 +134,28 @@ class Inferencer(BaseTrainer):
         batch = self.move_batch_to_device(batch)
         batch = self.transform_batch(batch)  # transform batch on device -- faster
 
-        outputs = self.model(**batch)
+        if self.text_to_mel:
+            print('batch[text]:', batch['text'])
+            batch['spectrogram'] = self.text_to_mel_model(batch['text'][0])[0]
+            print('new spectrogram:', batch['spectrogram'])
+        else: # If it is filled with temporarty patch: calculate real mel-spec on GPU
+            batch['spectrogram'] = self.mel_spec(batch['audio'])
+
+
+        outputs = self.generator(**batch)
         batch.update(outputs)
 
-        if metrics is not None:
-            for met in self.metrics["inference"]:
-                metrics.update(met.name, met(**batch))
-
-        # Some saving logic. This is an example
-        # Use if you need to save predictions on disk
-
-        batch_size = batch["logits"].shape[0]
-        current_id = batch_idx * batch_size
-
-        for i in range(batch_size):
-            # clone because of
-            # https://github.com/pytorch/pytorch/issues/1995
-            logits = batch["logits"][i].clone()
-            label = batch["labels"][i].clone()
-            pred_label = logits.argmax(dim=-1)
-
-            output_id = current_id + i
-
-            output = {
-                "pred_label": pred_label,
-                "label": label,
-            }
-
+        
+        for gen_audio, audio_path in zip(
+            batch['y_gen'], batch["audio_path"]
+        ):
             if self.save_path is not None:
                 # you can use safetensors or other lib here
-                torch.save(output, self.save_path / part / f"output_{output_id}.pth")
+                last_audio_part = audio_path.split("/")[-1]
+
+                path = pathlib.Path(self.save_path) / (pathlib.Path(audio_path).stem + '.wav')
+                print('saved:', path)
+                torchaudio.save(path, gen_audio, self.sample_rate)
 
         return batch
 
@@ -164,13 +171,15 @@ class Inferencer(BaseTrainer):
         """
 
         self.is_train = False
-        self.model.eval()
+        self.generator.eval()
 
-        self.evaluation_metrics.reset()
+        if self.evaluation_metrics is not None:
+            self.evaluation_metrics.reset() 
 
         # create Save dir
         if self.save_path is not None:
-            (self.save_path / part).mkdir(exist_ok=True, parents=True)
+            pass
+            # (self.save_path / part).mkdir(exist_ok=True, parents=True)
 
         with torch.no_grad():
             for batch_idx, batch in tqdm(
@@ -185,4 +194,6 @@ class Inferencer(BaseTrainer):
                     metrics=self.evaluation_metrics,
                 )
 
+        if self.evaluation_metrics is None:
+            return None
         return self.evaluation_metrics.result()

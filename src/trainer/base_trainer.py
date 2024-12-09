@@ -42,7 +42,20 @@ class BaseTrainer:
     ):
         """
         Args:
-            model (nn.Module): PyTorch model.
+            generator (nn.Module): Generator model.
+            discriminator_mpd (nn.Module): Multi-Period Discriminator model.
+            discriminator_msd (nn.Module): Multi-Scale Discriminator model.
+            criterion_generator (nn.Module): Loss function for generator training.
+            criterion_discriminator (nn.Module): Loss function for discriminator training.
+            metrics (dict): Dict with the definition of metrics for training
+                (metrics[train]) and inference (metrics[inference]). Each
+                metric is an instance of src.metrics.BaseMetric.
+            optimizer_generator (Optimizer): Optimizer for the generator model.
+            optimizer_discriminator_mpd (Optimizer): Optimizer for the MPD model.
+            optimizer_discriminator_msd (Optimizer): Optimizer for the MSD model.
+            lr_scheduler_generator (LRScheduler): Learning rate scheduler for generator optimizer.
+            lr_scheduler_discriminator_mpd (LRScheduler): Learning rate scheduler for MPD optimizer.
+            lr_scheduler_discriminator_msd (LRScheduler): Learning rate scheduler for MSD optimizer.
             criterion (nn.Module): loss function for model training.
             metrics (dict): dict with the definition of metrics for training
                 (metrics[train]) and inference (metrics[inference]). Each
@@ -624,7 +637,9 @@ class BaseTrainer:
 
         if checkpoint.get("state_dict_generator") is not None:
             self.generator.load_state_dict(checkpoint["state_dict_generator"])
-            self.discriminator_mpd.load_state_dict(checkpoint["state_dict_discriminator_mpd"])
-            self.discriminator_msd.load_state_dict(checkpoint["state_dict_discriminator_msd"])
+            if self.discriminator_mpd is not None: # Options for Inference mode, where discriminators are not needed
+                self.discriminator_mpd.load_state_dict(checkpoint["state_dict_discriminator_mpd"])
+            if self.discriminator_msd is not None:
+                self.discriminator_msd.load_state_dict(checkpoint["state_dict_discriminator_msd"])
         else:
             self.generator.load_state_dict(checkpoint)
