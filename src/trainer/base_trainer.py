@@ -8,6 +8,7 @@ from tqdm.auto import tqdm
 from src.datasets.data_utils import inf_loop
 from src.metrics.tracker import MetricTracker
 from src.utils.io_utils import ROOT_PATH
+from src.transforms.mel_spectrogram import MelSpectrogram
 
 
 class BaseTrainer:
@@ -65,6 +66,7 @@ class BaseTrainer:
         """
         self.is_train = True
         self.sample_rate = sample_rate
+        self.mel_spec = MelSpectrogram()
 
         self.config = config
         self.cfg_trainer = self.config.trainer

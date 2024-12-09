@@ -1,7 +1,6 @@
 from src.metrics.tracker import MetricTracker
 from src.trainer.base_trainer import BaseTrainer
 from src.logger.utils import plot_spectrogram
-from src.transforms.mel_spectrogram import MelSpectrogram
 import torch.nn.functional as F
 import torch 
 
@@ -131,7 +130,7 @@ class Trainer(BaseTrainer):
         self.writer.add_audio("y_gen", y_gen.squeeze(1), self.sample_rate)
 
     def log_spectrogram(self, spectrogram, y_gen, **batch):
-        gen_spectrogram = MelSpectrogram()(y_gen) + 1e-12
+        gen_spectrogram = self.mel_spec(y_gen) + 1e-12
         original_spectrogram = spectrogram + 1e-12
 
 
