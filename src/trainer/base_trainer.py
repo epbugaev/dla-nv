@@ -17,17 +17,25 @@ class BaseTrainer:
 
     def __init__(
         self,
-        model,
-        criterion,
+        generator,
+        discriminator_mpd,
+        discriminator_msd,
+        criterion_generator,
+        criterion_discriminator,
         metrics,
-        optimizer,
-        lr_scheduler,
+        optimizer_generator,
+        optimizer_discriminator_mpd,
+        optimizer_discriminator_msd,
+        lr_scheduler_generator,
+        lr_scheduler_discriminator_mpd,
+        lr_scheduler_discriminator_msd,
         config,
         device,
         dataloaders,
         logger,
         writer,
         epoch_len=None,
+        sample_rate=22050,
         skip_oom=True,
         batch_transforms=None,
     ):
@@ -56,6 +64,7 @@ class BaseTrainer:
                 tensor name.
         """
         self.is_train = True
+        self.sample_rate = sample_rate
 
         self.config = config
         self.cfg_trainer = self.config.trainer
@@ -66,10 +75,21 @@ class BaseTrainer:
         self.logger = logger
         self.log_step = config.trainer.get("log_step", 50)
 
-        self.model = model
-        self.criterion = criterion
-        self.optimizer = optimizer
-        self.lr_scheduler = lr_scheduler
+        self.generator = generator
+        self.discriminator_mpd = discriminator_mpd
+        self.discriminator_msd = discriminator_msd
+
+        self.criterion_generator = criterion_generator
+        self.criterion_discriminator = criterion_discriminator
+
+        self.optimizer_generator = optimizer_generator
+        self.optimizer_discriminator_mpd = optimizer_discriminator_mpd  
+        self.optimizer_discriminator_msd = optimizer_discriminator_msd
+
+        self.lr_scheduler_generator = lr_scheduler_generator
+        self.lr_scheduler_discriminator_mpd = lr_scheduler_discriminator_mpd
+        self.lr_scheduler_discriminator_msd = lr_scheduler_discriminator_msd
+
         self.batch_transforms = batch_transforms
 
         # define dataloaders
@@ -117,17 +137,32 @@ class BaseTrainer:
 
         # define metrics
         self.metrics = metrics
-        self.train_metrics = MetricTracker(
-            *self.config.writer.loss_names,
-            "grad_norm",
-            *[m.name for m in self.metrics["train"]],
-            writer=self.writer,
-        )
-        self.evaluation_metrics = MetricTracker(
-            *self.config.writer.loss_names,
+        
+        if self.metrics["train"] is not None:
+            self.train_metrics = MetricTracker(
+                *self.config.writer.loss_names,
+                *["grad_norm_generator", "grad_norm_discriminator_mpd", "grad_norm_discriminator_msd"],
+                *[m.name for m in self.metrics["train"]],
+                writer=self.writer,
+            )
+        else:
+            self.train_metrics = MetricTracker(
+                *self.config.writer.loss_names,
+                *["grad_norm_generator", "grad_norm_discriminator_mpd", "grad_norm_discriminator_msd"],
+                writer=self.writer,
+            )
+
+        if self.metrics["inference"] is not None:
+            self.evaluation_metrics = MetricTracker(
+                *self.config.writer.loss_names,
             *[m.name for m in self.metrics["inference"]],
             writer=self.writer,
-        )
+            )
+        else: 
+            self.evaluation_metrics = MetricTracker(
+                *self.config.writer.loss_names,
+                writer=self.writer,
+            )
 
         # define checkpoint dir and init everything if required
 
@@ -198,7 +233,10 @@ class BaseTrainer:
                 this epoch.
         """
         self.is_train = True
-        self.model.train()
+        self.generator.train()
+        self.discriminator_mpd.train()
+        self.discriminator_msd.train()
+
         self.train_metrics.reset()
         self.writer.set_step((epoch - 1) * self.epoch_len)
         self.writer.add_scalar("epoch", epoch)
@@ -218,18 +256,26 @@ class BaseTrainer:
                 else:
                     raise e
 
-            self.train_metrics.update("grad_norm", self._get_grad_norm())
+            self.train_metrics.update("grad_norm_generator", self._get_grad_norm(self.generator))
+            self.train_metrics.update("grad_norm_discriminator_mpd", self._get_grad_norm(self.discriminator_mpd))
+            self.train_metrics.update("grad_norm_discriminator_msd", self._get_grad_norm(self.discriminator_msd))
 
             # log current results
             if batch_idx % self.log_step == 0:
                 self.writer.set_step((epoch - 1) * self.epoch_len + batch_idx)
                 self.logger.debug(
-                    "Train Epoch: {} {} Loss: {:.6f}".format(
-                        epoch, self._progress(batch_idx), batch["loss"].item()
+                    "Train Epoch: {} {} Gen Loss: {:.6f} Disc Loss: {:.6f}".format(
+                        epoch, self._progress(batch_idx), batch["full_generator_loss"].item(), batch['discriminator_loss'].item()
                     )
                 )
                 self.writer.add_scalar(
-                    "learning rate", self.lr_scheduler.get_last_lr()[0]
+                    "learning rate generator", self.lr_scheduler_generator.get_last_lr()[0]
+                )
+                self.writer.add_scalar(
+                    "learning rate discriminator mpd", self.lr_scheduler_discriminator_mpd.get_last_lr()[0]
+                )
+                self.writer.add_scalar(
+                    "learning rate discriminator msd", self.lr_scheduler_discriminator_msd.get_last_lr()[0]
                 )
                 self._log_scalars(self.train_metrics)
                 self._log_batch(batch_idx, batch)
@@ -261,7 +307,10 @@ class BaseTrainer:
             logs (dict): logs that contain the information about evaluation.
         """
         self.is_train = False
-        self.model.eval()
+        self.generator.eval()
+        self.discriminator_mpd.eval()
+        self.discriminator_msd.eval()
+        
         self.evaluation_metrics.reset()
         with torch.no_grad():
             for batch_idx, batch in tqdm(
@@ -380,11 +429,17 @@ class BaseTrainer:
         """
         if self.config["trainer"].get("max_grad_norm", None) is not None:
             clip_grad_norm_(
-                self.model.parameters(), self.config["trainer"]["max_grad_norm"]
+                self.generator.parameters(), self.config["trainer"]["max_grad_norm"]
+            )
+            clip_grad_norm_(
+                self.discriminator_mpd.parameters(), self.config["trainer"]["max_grad_norm"]
+            )
+            clip_grad_norm_(
+                self.discriminator_msd.parameters(), self.config["trainer"]["max_grad_norm"]
             )
 
     @torch.no_grad()
-    def _get_grad_norm(self, norm_type=2):
+    def _get_grad_norm(self, model, norm_type=2):
         """
         Calculates the gradient norm for logging.
 
@@ -393,7 +448,7 @@ class BaseTrainer:
         Returns:
             total_norm (float): the calculated norm.
         """
-        parameters = self.model.parameters()
+        parameters = model.parameters()
         if isinstance(parameters, torch.Tensor):
             parameters = [parameters]
         parameters = [p for p in parameters if p.grad is not None]
@@ -462,13 +517,19 @@ class BaseTrainer:
                 'model_best.pth'(do not duplicate the checkpoint as
                 checkpoint-epochEpochNumber.pth)
         """
-        arch = type(self.model).__name__
+        arch = type(self.generator).__name__
         state = {
             "arch": arch,
             "epoch": epoch,
-            "state_dict": self.model.state_dict(),
-            "optimizer": self.optimizer.state_dict(),
-            "lr_scheduler": self.lr_scheduler.state_dict(),
+            "state_dict_generator": self.generator.state_dict(),
+            "state_dict_discriminator_mpd": self.discriminator_mpd.state_dict(),
+            "state_dict_discriminator_msd": self.discriminator_msd.state_dict(),
+            "optimizer_generator": self.optimizer_generator.state_dict(),
+            "optimizer_discriminator_mpd": self.optimizer_discriminator_mpd.state_dict(),
+            "optimizer_discriminator_msd": self.optimizer_discriminator_msd.state_dict(),
+            "lr_scheduler_generator": self.lr_scheduler_generator.state_dict(),
+            "lr_scheduler_discriminator_mpd": self.lr_scheduler_discriminator_mpd.state_dict(),
+            "lr_scheduler_discriminator_msd": self.lr_scheduler_discriminator_msd.state_dict(),
             "monitor_best": self.mnt_best,
             "config": self.config,
         }
@@ -499,22 +560,29 @@ class BaseTrainer:
         """
         resume_path = str(resume_path)
         self.logger.info(f"Loading checkpoint: {resume_path} ...")
+        print('resume_path:', resume_path)
         checkpoint = torch.load(resume_path, self.device)
         self.start_epoch = checkpoint["epoch"] + 1
         self.mnt_best = checkpoint["monitor_best"]
 
         # load architecture params from checkpoint.
-        if checkpoint["config"]["model"] != self.config["model"]:
+        if checkpoint["config"]["generator"] != self.config["generator"]:
             self.logger.warning(
                 "Warning: Architecture configuration given in the config file is different from that "
                 "of the checkpoint. This may yield an exception when state_dict is loaded."
             )
-        self.model.load_state_dict(checkpoint["state_dict"])
+        self.generator.load_state_dict(checkpoint["state_dict_generator"])
+        self.discriminator_mpd.load_state_dict(checkpoint["state_dict_discriminator_mpd"])
+        self.discriminator_msd.load_state_dict(checkpoint["state_dict_discriminator_msd"])
 
         # load optimizer state from checkpoint only when optimizer type is not changed.
         if (
-            checkpoint["config"]["optimizer"] != self.config["optimizer"]
-            or checkpoint["config"]["lr_scheduler"] != self.config["lr_scheduler"]
+            checkpoint["config"]["optimizer_generator"] != self.config["optimizer_generator"]
+            or checkpoint["config"]["lr_scheduler_generator"] != self.config["lr_scheduler_generator"]
+            or checkpoint["config"]["optimizer_discriminator_mpd"] != self.config["optimizer_discriminator_mpd"]
+            or checkpoint["config"]["lr_scheduler_discriminator_mpd"] != self.config["lr_scheduler_discriminator_mpd"]
+            or checkpoint["config"]["optimizer_discriminator_msd"] != self.config["optimizer_discriminator_msd"]
+            or checkpoint["config"]["lr_scheduler_discriminator_msd"] != self.config["lr_scheduler_discriminator_msd"]
         ):
             self.logger.warning(
                 "Warning: Optimizer or lr_scheduler given in the config file is different "
@@ -522,8 +590,13 @@ class BaseTrainer:
                 "are not resumed."
             )
         else:
-            self.optimizer.load_state_dict(checkpoint["optimizer"])
-            self.lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
+            self.optimizer_generator.load_state_dict(checkpoint["optimizer_generator"])
+            self.optimizer_discriminator_mpd.load_state_dict(checkpoint["optimizer_discriminator_mpd"])
+            self.optimizer_discriminator_msd.load_state_dict(checkpoint["optimizer_discriminator_msd"])
+
+            self.lr_scheduler_generator.load_state_dict(checkpoint["lr_scheduler_generator"])
+            self.lr_scheduler_discriminator_mpd.load_state_dict(checkpoint["lr_scheduler_discriminator_mpd"])
+            self.lr_scheduler_discriminator_msd.load_state_dict(checkpoint["lr_scheduler_discriminator_msd"])
 
         self.logger.info(
             f"Checkpoint loaded. Resume training from epoch {self.start_epoch}"
@@ -547,7 +620,9 @@ class BaseTrainer:
             print(f"Loading model weights from: {pretrained_path} ...")
         checkpoint = torch.load(pretrained_path, self.device)
 
-        if checkpoint.get("state_dict") is not None:
-            self.model.load_state_dict(checkpoint["state_dict"])
+        if checkpoint.get("state_dict_generator") is not None:
+            self.generator.load_state_dict(checkpoint["state_dict_generator"])
+            self.discriminator_mpd.load_state_dict(checkpoint["state_dict_discriminator_mpd"])
+            self.discriminator_msd.load_state_dict(checkpoint["state_dict_discriminator_msd"])
         else:
-            self.model.load_state_dict(checkpoint)
+            self.generator.load_state_dict(checkpoint)
